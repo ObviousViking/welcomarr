@@ -1,0 +1,8 @@
+{
+    "admin": {
+        "username": "admin",
+        "password": "admin"
+    },
+    "invitations": [],
+    "users": []
+}

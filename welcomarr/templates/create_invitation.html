@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Create Invitation - Welcomarr{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Create New Invitation</h4>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label for="name" class="form-label">Invitation Name</label>
+                            <input type="text" class="form-control" id="name" name="name" required placeholder="e.g., Family Member, Friend">
+                            <div class="form-text">A descriptive name to help you identify this invitation.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="expiry_days" class="form-label">Expires After (days)</label>
+                            <input type="number" class="form-control" id="expiry_days" name="expiry_days" value="7" min="1" required>
+                            <div class="form-text">Number of days until this invitation expires.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="max_uses" class="form-label">Maximum Uses</label>
+                            <input type="number" class="form-control" id="max_uses" name="max_uses" value="1" min="1" required>
+                            <div class="form-text">How many times this invitation can be used.</div>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                            <button type="submit" class="btn btn-primary">Create Invitation</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

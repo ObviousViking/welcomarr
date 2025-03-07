@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}Plex Invitation - Welcomarr{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header bg-primary text-white text-center">
+                    <h3 class="mb-0">Welcome to Our Plex Server!</h3>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-4">
+                        <i class="fas fa-film fa-4x text-primary mb-3"></i>
+                        <h4>You're just a few steps away from accessing our media library</h4>
+                    </div>
+                    
+                    <form action="{{ url_for('onboard') }}" method="post">
+                        <input type="hidden" name="code" value="{{ invitation.code }}">
+                        
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email Address</label>
+                            <input type="email" class="form-control" id="email" name="email" required placeholder="Enter your email address">
+                            <div class="form-text">This email will be used to send you a Plex invitation.</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required placeholder="Choose a username for Plex">
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="agreeTerms" required>
+                            <label class="form-check-label" for="agreeTerms">
+                                I agree to follow the server rules and not share my account with others.
+                            </label>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg">Complete Registration</button>
+                        </div>
+                    </form>
+                </div>
+                <div class="card-footer">
+                    <div class="accordion" id="plexInfoAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#whatIsPlex">
+                                    What is Plex?
+                                </button>
+                            </h2>
+                            <div id="whatIsPlex" class="accordion-collapse collapse" data-bs-parent="#plexInfoAccordion">
+                                <div class="accordion-body">
+                                    <p>Plex is a media server software that allows you to organize and stream your media collection (movies, TV shows, music, etc.) to any device, anywhere.</p>
+                                    <p>Once you're invited, you'll be able to access our media library through the Plex app on your smart TV, phone, tablet, or computer.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#howToUse">
+                                    How to use Plex after registration
+                                </button>
+                            </h2>
+                            <div id="howToUse" class="accordion-collapse collapse" data-bs-parent="#plexInfoAccordion">
+                                <div class="accordion-body">
+                                    <ol>
+                                        <li>After registration, you'll receive an email invitation to join our Plex server.</li>
+                                        <li>Accept the invitation and create a Plex account if you don't already have one.</li>
+                                        <li>Download the Plex app on your preferred device from <a href="https://www.plex.tv/downloads/" target="_blank">plex.tv/downloads</a>.</li>
+                                        <li>Sign in with your Plex account, and you'll see our server in your list of available libraries.</li>
+                                        <li>Start enjoying the content!</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
