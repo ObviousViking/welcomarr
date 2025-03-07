@@ -32,6 +32,11 @@ if (!file_exists(DATA_FILE)) {
             'site_name' => 'Welcomarr',
             'theme_color' => '#e5a00d'
         ],
+        'libraries' => [
+            ['id' => 'movies', 'name' => 'Movies'],
+            ['id' => 'tvshows', 'name' => 'TV Shows'],
+            ['id' => 'music', 'name' => 'Music']
+        ],
         'invitations' => [],
         'users' => []
     ];
@@ -116,8 +121,8 @@ function is_invitation_valid($invitation) {
         return false;
     }
     
-    // Check if invitation is used
-    if (isset($invitation['used']) && $invitation['used']) {
+    // Check if invitation has reached its usage limit
+    if (isset($invitation['usage_limit']) && isset($invitation['usage_count']) && $invitation['usage_count'] >= $invitation['usage_limit']) {
         return false;
     }
     
@@ -127,4 +132,180 @@ function is_invitation_valid($invitation) {
     }
     
     return true;
+}
+
+// Add user to Plex server
+function add_user_to_plex($plex_username, $libraries = []) {
+    $data = load_data();
+    $settings = $data['settings'];
+    
+    // Check if Plex token is set
+    if (empty($settings['plex_token'])) {
+        return [
+            'success' => false,
+            'message' => 'Plex token is not configured'
+        ];
+    }
+    
+    // Prepare API request to share libraries with the user
+    $url = 'https://plex.tv/api/v2/shared_servers';
+    $headers = [
+        'X-Plex-Token: ' . $settings['plex_token'],
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ];
+    
+    // Get the server ID (machine identifier)
+    $server_id = get_plex_server_id($settings['plex_token']);
+    if (!$server_id) {
+        return [
+            'success' => false,
+            'message' => 'Could not retrieve Plex server ID'
+        ];
+    }
+    
+    // Get the user ID from the username
+    $user_id = get_plex_user_id($plex_username, $settings['plex_token']);
+    if (!$user_id) {
+        return [
+            'success' => false,
+            'message' => 'Could not find Plex user: ' . $plex_username
+        ];
+    }
+    
+    // Prepare the library section IDs
+    $section_ids = [];
+    if (!empty($libraries)) {
+        // Get all library sections
+        $sections = get_plex_library_sections($settings['plex_token']);
+        
+        // Filter sections based on selected libraries
+        foreach ($sections as $section) {
+            if (in_array($section['id'], $libraries)) {
+                $section_ids[] = $section['id'];
+            }
+        }
+    }
+    
+    // Prepare the request data
+    $post_data = [
+        'machineIdentifier' => $server_id,
+        'invitedEmail' => $plex_username,
+        'librarySectionIds' => $section_ids
+    ];
+    
+    // Initialize cURL
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+    // Execute the request
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    
+    // Check if the request was successful
+    if ($http_code >= 200 && $http_code < 300) {
+        return [
+            'success' => true,
+            'message' => 'User added to Plex server successfully'
+        ];
+    } else {
+        return [
+            'success' => false,
+            'message' => 'Failed to add user to Plex server: ' . $response
+        ];
+    }
+}
+
+// Get Plex server ID (machine identifier)
+function get_plex_server_id($token) {
+    $url = 'https://plex.tv/api/v2/resources?includeHttps=1&X-Plex-Token=' . $token;
+    $headers = [
+        'Accept: application/json'
+    ];
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    if ($response) {
+        $data = json_decode($response, true);
+        foreach ($data as $resource) {
+            if ($resource['provides'] == 'server') {
+                return $resource['clientIdentifier'];
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Get Plex user ID from username
+function get_plex_user_id($username, $token) {
+    $url = 'https://plex.tv/api/v2/users?X-Plex-Token=' . $token;
+    $headers = [
+        'Accept: application/json'
+    ];
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    if ($response) {
+        $data = json_decode($response, true);
+        foreach ($data as $user) {
+            if ($user['username'] == $username || $user['email'] == $username) {
+                return $user['id'];
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Get Plex library sections
+function get_plex_library_sections($token) {
+    $server_id = get_plex_server_id($token);
+    if (!$server_id) {
+        return [];
+    }
+    
+    $url = 'https://plex.tv/api/v2/servers/' . $server_id . '/libraries?X-Plex-Token=' . $token;
+    $headers = [
+        'Accept: application/json'
+    ];
+    
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    if ($response) {
+        return json_decode($response, true);
+    }
+    
+    return [];
+}
+
+// Get base URL
+function get_base_url() {
+    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'];
+    $script = dirname($_SERVER['SCRIPT_NAME']);
+    $base_url = $protocol . '://' . $host . $script;
+    if (substr($base_url, -1) !== '/') {
+        $base_url .= '/';
+    }
+    return $base_url . 'index.php';
 }

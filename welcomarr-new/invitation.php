@@ -28,22 +28,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
         'email' => $email,
         'plex_username' => $plex_username,
         'joined' => date('Y-m-d H:i:s'),
-        'invitation_code' => $code
+        'invitation_code' => $code,
+        'libraries' => $invitation['libraries'] ?? []
     ];
     
     // Add user to data
     $data['users'][] = $user;
     
-    // Mark invitation as used
-    $data['invitations'][$invitation_index]['used'] = true;
-    $data['invitations'][$invitation_index]['used_by'] = $email;
-    $data['invitations'][$invitation_index]['used_at'] = date('Y-m-d H:i:s');
+    // Update invitation usage count
+    if (!isset($data['invitations'][$invitation_index]['usage_count'])) {
+        $data['invitations'][$invitation_index]['usage_count'] = 0;
+    }
+    $data['invitations'][$invitation_index]['usage_count']++;
+    $data['invitations'][$invitation_index]['last_used_by'] = $email;
+    $data['invitations'][$invitation_index]['last_used_at'] = date('Y-m-d H:i:s');
     
     // Save data
     save_data($data);
     
+    // Add user to Plex server
+    $plex_result = add_user_to_plex($plex_username, $invitation['libraries'] ?? []);
+    
     // Set flash message
-    set_flash_message('Your information has been submitted successfully!', 'success');
+    if ($plex_result['success']) {
+        set_flash_message('Your information has been submitted successfully! You have been added to the Plex server.', 'success');
+    } else {
+        set_flash_message('Your information has been submitted successfully! However, there was an issue adding you to the Plex server: ' . $plex_result['message'], 'warning');
+    }
     
     // Redirect to success page
     header('Location: success.php?code=' . $code);
@@ -133,19 +144,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
                 </div>
             </div>
         </div>
-        <?php elseif (isset($invitation['used']) && $invitation['used']): ?>
+        <?php elseif (isset($invitation['usage_limit']) && isset($invitation['usage_count']) && $invitation['usage_limit'] > 0 && $invitation['usage_count'] >= $invitation['usage_limit']): ?>
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card">
                     <div class="card-body text-center">
-                        <h2 class="card-title">Invitation Already Used</h2>
-                        <p class="card-text">This invitation has already been used.</p>
+                        <h2 class="card-title">Invitation Fully Used</h2>
+                        <p class="card-text">This invitation has reached its maximum number of uses.</p>
                         <a href="index.php" class="btn btn-primary">Go Back Home</a>
                     </div>
                 </div>
             </div>
         </div>
-        <?php elseif (isset($invitation['expires']) && strtotime($invitation['expires']) < time()): ?>
+        <?php elseif (isset($invitation['expires']) && $invitation['expires'] && strtotime($invitation['expires']) < time()): ?>
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card">

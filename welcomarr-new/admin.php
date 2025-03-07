@@ -14,11 +14,16 @@ $users = $data['users'] ?? [];
 $active_invitations = 0;
 $used_invitations = 0;
 $expired_invitations = 0;
+$total_uses = 0;
 
 foreach ($invitations as $invitation) {
-    if (isset($invitation['used']) && $invitation['used']) {
+    $usage_count = $invitation['usage_count'] ?? 0;
+    $usage_limit = $invitation['usage_limit'] ?? 1;
+    $total_uses += $usage_count;
+    
+    if ($usage_limit > 0 && $usage_count >= $usage_limit) {
         $used_invitations++;
-    } elseif (isset($invitation['expires']) && strtotime($invitation['expires']) < time()) {
+    } elseif (isset($invitation['expires']) && $invitation['expires'] && strtotime($invitation['expires']) < time()) {
         $expired_invitations++;
     } else {
         $active_invitations++;
@@ -166,32 +171,68 @@ if (isset($_GET['delete']) && !empty($_GET['delete'])) {
                     <table class="table table-hover">
                         <thead>
                             <tr>
-                                <th>Code</th>
-                                <th>Email</th>
+                                <th>Name/Code</th>
+                                <th>Libraries</th>
                                 <th>Created</th>
                                 <th>Expires</th>
+                                <th>Usage</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($invitations as $invitation): ?>
+                            <?php 
+                                $usage_count = $invitation['usage_count'] ?? 0;
+                                $usage_limit = $invitation['usage_limit'] ?? 1;
+                                $is_expired = isset($invitation['expires']) && $invitation['expires'] && strtotime($invitation['expires']) < time();
+                                $is_used_up = $usage_limit > 0 && $usage_count >= $usage_limit;
+                            ?>
                             <tr>
-                                <td><code><?php echo $invitation['code']; ?></code></td>
-                                <td><?php echo $invitation['email'] ?? 'N/A'; ?></td>
-                                <td><?php echo isset($invitation['created']) ? format_date($invitation['created']) : 'N/A'; ?></td>
-                                <td><?php echo isset($invitation['expires']) ? format_date($invitation['expires']) : 'Never'; ?></td>
                                 <td>
-                                    <?php if (isset($invitation['used']) && $invitation['used']): ?>
-                                    <span class="badge bg-success">Used</span>
-                                    <?php elseif (isset($invitation['expires']) && strtotime($invitation['expires']) < time()): ?>
+                                    <strong><?php echo htmlspecialchars($invitation['name'] ?? 'Invitation'); ?></strong><br>
+                                    <code><?php echo $invitation['code']; ?></code>
+                                    <?php if (!empty($invitation['email'])): ?>
+                                    <div class="small text-muted"><?php echo htmlspecialchars($invitation['email']); ?></div>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($invitation['libraries'])): ?>
+                                    <div class="small">
+                                        <?php foreach ($invitation['libraries'] as $lib_id): ?>
+                                            <span class="badge bg-info"><?php echo $lib_id; ?></span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php else: ?>
+                                    <em class="text-muted">All libraries</em>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo isset($invitation['created']) ? format_date($invitation['created']) : 'N/A'; ?></td>
+                                <td>
+                                    <?php if (isset($invitation['expires']) && $invitation['expires']): ?>
+                                        <?php echo format_date($invitation['expires']); ?>
+                                    <?php else: ?>
+                                        <em>Never</em>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php echo $usage_count; ?> / 
+                                    <?php echo $usage_limit > 0 ? $usage_limit : '∞'; ?>
+                                </td>
+                                <td>
+                                    <?php if ($is_used_up): ?>
+                                    <span class="badge bg-secondary">Used Up</span>
+                                    <?php elseif ($is_expired): ?>
                                     <span class="badge bg-danger">Expired</span>
                                     <?php else: ?>
-                                    <span class="badge bg-primary">Active</span>
+                                    <span class="badge bg-success">Active</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
                                     <div class="btn-group">
+                                        <button class="btn btn-sm btn-primary copy-btn" data-clipboard-text="<?php echo get_base_url(); ?>?code=<?php echo $invitation['code']; ?>" title="Copy Link">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
                                         <a href="invitation.php?code=<?php echo $invitation['code']; ?>" class="btn btn-sm btn-info" title="View">
                                             <i class="fas fa-eye"></i>
                                         </a>
