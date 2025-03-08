@@ -253,13 +253,27 @@ function update_invitation_usage($code, $used_by) {
         $db->exec('BEGIN TRANSACTION');
         
         // Get current invitation data
-        $stmt = $db->prepare('SELECT id, usage_count FROM invitations WHERE code = :code LIMIT 1');
+        $stmt = $db->prepare('SELECT id, usage_count, usage_limit, expires FROM invitations WHERE code = :code LIMIT 1');
         $stmt->bindValue(':code', $code, SQLITE3_TEXT);
         $result = $stmt->execute();
         
         if ($invitation = $result->fetchArray(SQLITE3_ASSOC)) {
             $usage_count = $invitation['usage_count'] + 1;
             $now = date('Y-m-d H:i:s');
+            
+            // Check if invitation has expired
+            if (!empty($invitation['expires']) && strtotime($invitation['expires']) < time()) {
+                error_log("Failed to update invitation usage: invitation with code $code has expired");
+                $db->exec('ROLLBACK');
+                return false;
+            }
+            
+            // Check if invitation has reached usage limit
+            if ($invitation['usage_limit'] > 0 && $usage_count > $invitation['usage_limit']) {
+                error_log("Failed to update invitation usage: invitation with code $code has reached usage limit");
+                $db->exec('ROLLBACK');
+                return false;
+            }
             
             // Update invitation usage
             $update_stmt = $db->prepare('
@@ -293,5 +307,267 @@ function update_invitation_usage($code, $used_by) {
             $db->exec('ROLLBACK');
         }
         return false;
+    }
+}
+
+/**
+ * Check if an invitation is valid
+ * 
+ * @param string $code Invitation code
+ * @return bool True if invitation is valid, false otherwise
+ */
+function is_invitation_valid($code) {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare('
+            SELECT usage_count, usage_limit, expires 
+            FROM invitations 
+            WHERE code = :code LIMIT 1
+        ');
+        $stmt->bindValue(':code', $code, SQLITE3_TEXT);
+        $result = $stmt->execute();
+        
+        if ($invitation = $result->fetchArray(SQLITE3_ASSOC)) {
+            // Check if invitation has expired
+            if (!empty($invitation['expires']) && strtotime($invitation['expires']) < time()) {
+                return false;
+            }
+            
+            // Check if invitation has reached usage limit
+            if ($invitation['usage_limit'] > 0 && $invitation['usage_count'] >= $invitation['usage_limit']) {
+                return false;
+            }
+            
+            return true;
+        }
+        
+        return false;
+    } catch (Exception $e) {
+        error_log("Error checking invitation validity for code $code: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Get libraries associated with an invitation
+ * 
+ * @param int $invitation_id Invitation ID
+ * @return array Array of library IDs
+ */
+function get_invitation_libraries($invitation_id) {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare('
+            SELECT l.library_id 
+            FROM invitation_libraries il
+            JOIN libraries l ON il.library_id = l.id
+            WHERE il.invitation_id = :invitation_id
+        ');
+        $stmt->bindValue(':invitation_id', $invitation_id, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+        
+        $libraries = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $libraries[] = $row['library_id'];
+        }
+        
+        return $libraries;
+    } catch (Exception $e) {
+        error_log("Error getting libraries for invitation ID $invitation_id: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Get all available Plex libraries
+ * 
+ * @return array Array of libraries with id, title, and type
+ */
+function get_all_plex_libraries() {
+    try {
+        $plex_token = get_setting('plex_token');
+        if (empty($plex_token)) {
+            return [];
+        }
+        
+        $libraries = get_plex_library_sections($plex_token);
+        
+        // Format libraries for display
+        $formatted_libraries = [];
+        foreach ($libraries as $library) {
+            $formatted_libraries[] = [
+                'id' => $library['id'],
+                'title' => $library['title'],
+                'type' => $library['type']
+            ];
+        }
+        
+        return $formatted_libraries;
+    } catch (Exception $e) {
+        error_log("Error getting Plex libraries: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Create a new invitation
+ * 
+ * @param string $code Unique invitation code
+ * @param string $name Name for the invitation
+ * @param string $email Optional email address
+ * @param array $libraries Array of library IDs to grant access to
+ * @param int $usage_limit Maximum number of times the invitation can be used (0 for unlimited)
+ * @param string $expires Expiration date in Y-m-d H:i:s format (empty for no expiration)
+ * @return bool Success
+ */
+function create_invitation($code, $name, $email = '', $libraries = [], $usage_limit = 1, $expires = '') {
+    try {
+        $db = get_db_connection();
+        
+        // Start transaction
+        $db->exec('BEGIN TRANSACTION');
+        
+        // Insert invitation
+        $stmt = $db->prepare('
+            INSERT INTO invitations (code, name, email, created, expires, usage_limit, usage_count)
+            VALUES (:code, :name, :email, :created, :expires, :usage_limit, 0)
+        ');
+        
+        $stmt->bindValue(':code', $code, SQLITE3_TEXT);
+        $stmt->bindValue(':name', $name, SQLITE3_TEXT);
+        $stmt->bindValue(':email', $email, SQLITE3_TEXT);
+        $stmt->bindValue(':created', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+        $stmt->bindValue(':expires', $expires, SQLITE3_TEXT);
+        $stmt->bindValue(':usage_limit', $usage_limit, SQLITE3_INTEGER);
+        
+        $stmt->execute();
+        $invitation_id = $db->lastInsertRowID();
+        
+        // Add libraries if specified
+        if (!empty($libraries)) {
+            $library_stmt = $db->prepare('
+                INSERT OR IGNORE INTO libraries (library_id, name, type, last_updated)
+                VALUES (:library_id, :name, :type, :last_updated)
+            ');
+            
+            $link_stmt = $db->prepare('
+                INSERT INTO invitation_libraries (invitation_id, library_id)
+                VALUES (:invitation_id, (SELECT id FROM libraries WHERE library_id = :library_id))
+            ');
+            
+            // Get current libraries from Plex
+            $plex_token = get_setting('plex_token');
+            $plex_libraries = get_plex_library_sections($plex_token);
+            
+            foreach ($libraries as $library_id) {
+                // Find library details
+                $library_name = '';
+                $library_type = '';
+                
+                foreach ($plex_libraries as $plex_library) {
+                    if ($plex_library['id'] == $library_id) {
+                        $library_name = $plex_library['title'];
+                        $library_type = $plex_library['type'];
+                        break;
+                    }
+                }
+                
+                // Insert library if it doesn't exist
+                $library_stmt->bindValue(':library_id', $library_id, SQLITE3_TEXT);
+                $library_stmt->bindValue(':name', $library_name, SQLITE3_TEXT);
+                $library_stmt->bindValue(':type', $library_type, SQLITE3_TEXT);
+                $library_stmt->bindValue(':last_updated', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+                $library_stmt->execute();
+                $library_stmt->reset();
+                
+                // Link library to invitation
+                $link_stmt->bindValue(':invitation_id', $invitation_id, SQLITE3_INTEGER);
+                $link_stmt->bindValue(':library_id', $library_id, SQLITE3_TEXT);
+                $link_stmt->execute();
+                $link_stmt->reset();
+            }
+        }
+        
+        // Commit transaction
+        $db->exec('COMMIT');
+        
+        return true;
+    } catch (Exception $e) {
+        error_log("Error creating invitation: " . $e->getMessage());
+        if (isset($db)) {
+            $db->exec('ROLLBACK');
+        }
+        return false;
+    }
+}
+
+/**
+ * Get invitation details by code
+ * 
+ * @param string $code Invitation code
+ * @return array|false Invitation details or false if not found
+ */
+function get_invitation($code) {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare('
+            SELECT id, code, name, email, created, expires, usage_limit, usage_count, 
+                   last_used_by, last_used_at
+            FROM invitations 
+            WHERE code = :code LIMIT 1
+        ');
+        $stmt->bindValue(':code', $code, SQLITE3_TEXT);
+        $result = $stmt->execute();
+        
+        if ($invitation = $result->fetchArray(SQLITE3_ASSOC)) {
+            // Get associated libraries
+            $invitation['libraries'] = get_invitation_libraries($invitation['id']);
+            return $invitation;
+        }
+        
+        return false;
+    } catch (Exception $e) {
+        error_log("Error getting invitation details for code $code: " . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Get all invitations
+ * 
+ * @return array Array of invitations
+ */
+function get_all_invitations() {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare('
+            SELECT id, code, name, email, created, expires, usage_limit, usage_count, 
+                   last_used_by, last_used_at
+            FROM invitations 
+            ORDER BY created DESC
+        ');
+        $result = $stmt->execute();
+        
+        $invitations = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            // Get associated libraries
+            $row['libraries'] = get_invitation_libraries($row['id']);
+            
+            // Add status
+            if (!empty($row['expires']) && strtotime($row['expires']) < time()) {
+                $row['status'] = 'expired';
+            } else if ($row['usage_limit'] > 0 && $row['usage_count'] >= $row['usage_limit']) {
+                $row['status'] = 'used';
+            } else {
+                $row['status'] = 'active';
+            }
+            
+            $invitations[] = $row;
+        }
+        
+        return $invitations;
+    } catch (Exception $e) {
+        error_log("Error getting all invitations: " . $e->getMessage());
+        return [];
     }
 }
