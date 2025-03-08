@@ -1,7 +1,6 @@
 <?php
-// Database configuration (using SQLite)
-define('DB_FILE', __DIR__ . '/data/welcomarr.db');
-define('DATA_DIR', __DIR__ . '/data');
+// Include database functions
+require_once __DIR__ . '/db.php';
 
 // Application settings
 define('APP_NAME', 'Welcomarr');
@@ -11,82 +10,42 @@ define('APP_URL', 'http://localhost:56112'); // Change this to your domain
 // Start session
 session_start();
 
-// Create data directory if it doesn't exist
-if (!file_exists(DATA_DIR)) {
-    mkdir(DATA_DIR, 0755, true);
+// Flash messages
+function set_flash_message($message, $type = 'info') {
+    $_SESSION['flash'] = [
+        'message' => $message,
+        'type' => $type
+    ];
 }
 
-// Initialize database connection
-function get_db_connection() {
-    static $db = null;
+function get_flash_message() {
+    $flash = $_SESSION['flash'] ?? null;
+    unset($_SESSION['flash']);
+    return $flash;
+}
+
+// Authentication
+function is_logged_in() {
+    return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
+}
+
+function login($username, $password) {
+    $admin = get_admin();
     
-    if ($db === null) {
-        $db = new SQLite3(DB_FILE);
-        $db->exec('PRAGMA foreign_keys = ON');
+    if ($admin && $admin['username'] === $username && password_verify($password, $admin['password'])) {
+        $_SESSION['admin_logged_in'] = true;
+        return true;
     }
     
-    return $db;
+    return false;
 }
 
-// Initialize database tables if they don't exist
-function init_database() {
-    $db = get_db_connection();
-    
-    // Create admin table
-    $db->exec('CREATE TABLE IF NOT EXISTS admin (
-        id INTEGER PRIMARY KEY,
-        username TEXT NOT NULL,
-        password TEXT NOT NULL,
-        email TEXT
-    )');
-    
-    // Create settings table
-    $db->exec('CREATE TABLE IF NOT EXISTS settings (
-        id INTEGER PRIMARY KEY,
-        plex_server TEXT,
-        plex_token TEXT,
-        plex_url TEXT,
-        welcome_message TEXT,
-        site_name TEXT,
-        theme_color TEXT
-    )');
-    
-    // Create libraries table
-    $db->exec('CREATE TABLE IF NOT EXISTS libraries (
-        id INTEGER PRIMARY KEY,
-        library_id TEXT NOT NULL,
-        name TEXT NOT NULL
-    )');
-    
-    // Create invitations table
-    $db->exec('CREATE TABLE IF NOT EXISTS invitations (
-        id INTEGER PRIMARY KEY,
-        code TEXT NOT NULL UNIQUE,
-        name TEXT,
-        email TEXT,
-        created DATETIME NOT NULL,
-        expires DATETIME,
-        usage_count INTEGER DEFAULT 0,
-        usage_limit INTEGER DEFAULT 1,
-        last_used_by TEXT,
-        last_used_at DATETIME
-    )');
-    
-    // Create invitation_libraries table (for many-to-many relationship)
-    $db->exec('CREATE TABLE IF NOT EXISTS invitation_libraries (
-        invitation_id INTEGER,
-        library_id INTEGER,
-        PRIMARY KEY (invitation_id, library_id),
-        FOREIGN KEY (invitation_id) REFERENCES invitations(id) ON DELETE CASCADE,
-        FOREIGN KEY (library_id) REFERENCES libraries(id) ON DELETE CASCADE
-    )');
-    
-    // Create users table
-    $db->exec('CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT,
-        plex_username TEXT NOT NULL,
+function logout() {
+    unset($_SESSION['admin_logged_in']);
+    session_destroy();
+}
+
+// Plex API functions
         joined DATETIME NOT NULL,
         invitation_code TEXT,
         FOREIGN KEY (invitation_code) REFERENCES invitations(code)
