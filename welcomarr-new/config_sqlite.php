@@ -10,40 +10,7 @@ define('APP_URL', 'http://localhost:56112'); // Change this to your domain
 // Start session
 session_start();
 
-// Flash messages
-function set_flash_message($message, $type = 'info') {
-    $_SESSION['flash'] = [
-        'message' => $message,
-        'type' => $type
-    ];
-}
-
-function get_flash_message() {
-    $flash = $_SESSION['flash'] ?? null;
-    unset($_SESSION['flash']);
-    return $flash;
-}
-
-// Authentication
-function is_logged_in() {
-    return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
-}
-
-function login($username, $password) {
-    $admin = get_admin();
-    
-    if ($admin && $admin['username'] === $username && password_verify($password, $admin['password'])) {
-        $_SESSION['admin_logged_in'] = true;
-        return true;
-    }
-    
-    return false;
-}
-
-function logout() {
-    unset($_SESSION['admin_logged_in']);
-    session_destroy();
-}
+// Flash messages and authentication functions are defined below
 
 // Plex API functions
         joined DATETIME NOT NULL,

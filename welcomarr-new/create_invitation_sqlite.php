@@ -122,7 +122,7 @@ $libraries = get_libraries();
             <div class="col-md-8 mx-auto">
                 <div class="card">
                     <div class="card-body">
-                        <form method="post" action="create_invitation.php">
+                        <form method="post" action="create_invitation_sqlite.php">
                             <div class="mb-3">
                                 <label for="invitation_name" class="form-label">Invitation Name</label>
                                 <input type="text" class="form-control" id="invitation_name" name="invitation_name" placeholder="Family Movie Night" value="New Invitation">

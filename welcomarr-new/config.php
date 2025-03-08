@@ -11,33 +11,7 @@ define('APP_URL', 'http://localhost:56112'); // Change this to your domain
 session_start();
 
 // Helper functions
-function get_settings() {
-    $db = get_db_connection();
-    $settings = [];
-    
-    $stmt = $db->prepare('SELECT key, value FROM settings');
-    $result = $stmt->execute();
-    
-    while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-        $settings[$row['key']] = $row['value'];
-    }
-    
-    return $settings;
-}
-
-function update_settings($settings) {
-    $db = get_db_connection();
-    $stmt = $db->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)');
-    
-    foreach ($settings as $key => $value) {
-        $stmt->bindValue(':key', $key, SQLITE3_TEXT);
-        $stmt->bindValue(':value', $value, SQLITE3_TEXT);
-        $stmt->execute();
-        $stmt->reset();
-    }
-    
-    return true;
-}
+// Note: get_settings() and update_settings() functions are now in db.php
 
 // Flash message functions
 function set_flash_message($message, $type = 'success') {
