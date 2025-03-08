@@ -22,6 +22,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
     $email = $_POST['email'] ?? '';
     $plex_username = $_POST['plex_username'] ?? '';
     
+    // Validate Plex username
+    if (empty($plex_username)) {
+        set_flash_message('Plex username is required', 'danger');
+        header('Location: invitation.php?code=' . $code);
+        exit;
+    }
+    
+    // Add user to Plex server first
+    $plex_result = add_user_to_plex($plex_username, $invitation['libraries'] ?? []);
+    
     // Create user
     $user = [
         'name' => $name,
@@ -29,7 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
         'plex_username' => $plex_username,
         'joined' => date('Y-m-d H:i:s'),
         'invitation_code' => $code,
-        'libraries' => $invitation['libraries'] ?? []
+        'libraries' => $invitation['libraries'] ?? [],
+        'plex_status' => $plex_result['success'] ? 'added' : 'failed',
+        'plex_message' => $plex_result['message'] ?? ''
     ];
     
     // Add user to data
@@ -40,14 +52,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
         $data['invitations'][$invitation_index]['usage_count'] = 0;
     }
     $data['invitations'][$invitation_index]['usage_count']++;
-    $data['invitations'][$invitation_index]['last_used_by'] = $email;
+    $data['invitations'][$invitation_index]['last_used_by'] = $email ?: $plex_username;
     $data['invitations'][$invitation_index]['last_used_at'] = date('Y-m-d H:i:s');
     
     // Save data
     save_data($data);
-    
-    // Add user to Plex server
-    $plex_result = add_user_to_plex($plex_username, $invitation['libraries'] ?? []);
     
     // Set flash message
     if ($plex_result['success']) {
@@ -188,8 +197,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
                                 <input type="text" class="form-control" id="name" name="name" required>
                             </div>
                             <div class="mb-3">
-                                <label for="email" class="form-label">Your Email</label>
-                                <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($invitation['email'] ?? ''); ?>" required>
+                                <label for="email" class="form-label">Your Email (Optional)</label>
+                                <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($invitation['email'] ?? ''); ?>">
+                                <div class="form-text">Your email is optional but helpful for communication</div>
                             </div>
                             <div class="mb-3">
                                 <label for="plex_username" class="form-label">Plex Username</label>

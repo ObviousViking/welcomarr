@@ -182,15 +182,23 @@ function add_user_to_plex($plex_username, $libraries = []) {
         // Filter sections based on selected libraries
         foreach ($sections as $section) {
             if (in_array($section['id'], $libraries)) {
-                $section_ids[] = $section['id'];
+                $section_ids[] = (int)$section['id'];
             }
+        }
+    }
+    
+    // If no libraries were selected, share all libraries
+    if (empty($section_ids)) {
+        $sections = get_plex_library_sections($settings['plex_token']);
+        foreach ($sections as $section) {
+            $section_ids[] = (int)$section['id'];
         }
     }
     
     // Prepare the request data
     $post_data = [
         'machineIdentifier' => $server_id,
-        'invitedEmail' => $plex_username,
+        'invitedId' => $user_id,
         'librarySectionIds' => $section_ids
     ];
     
@@ -200,10 +208,12 @@ function add_user_to_plex($plex_username, $libraries = []) {
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_VERBOSE, true);
     
     // Execute the request
     $response = curl_exec($ch);
     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
     curl_close($ch);
     
     // Check if the request was successful
@@ -213,9 +223,17 @@ function add_user_to_plex($plex_username, $libraries = []) {
             'message' => 'User added to Plex server successfully'
         ];
     } else {
+        $error_message = 'Failed to add user to Plex server. HTTP Code: ' . $http_code;
+        if (!empty($error)) {
+            $error_message .= ' - cURL Error: ' . $error;
+        }
+        if (!empty($response)) {
+            $error_message .= ' - Response: ' . $response;
+        }
+        
         return [
             'success' => false,
-            'message' => 'Failed to add user to Plex server: ' . $response
+            'message' => $error_message
         ];
     }
 }
@@ -279,6 +297,7 @@ function get_plex_library_sections($token) {
         return [];
     }
     
+    // First try the Plex.tv API
     $url = 'https://plex.tv/api/v2/servers/' . $server_id . '/libraries?X-Plex-Token=' . $token;
     $headers = [
         'Accept: application/json'
@@ -292,9 +311,41 @@ function get_plex_library_sections($token) {
     curl_close($ch);
     
     if ($response) {
-        return json_decode($response, true);
+        $data = json_decode($response, true);
+        if (!empty($data)) {
+            return $data;
+        }
     }
     
+    // If that fails, try direct server connection if URL is configured
+    $data = load_data();
+    if (!empty($data['settings']['plex_url'])) {
+        $url = rtrim($data['settings']['plex_url'], '/') . '/library/sections?X-Plex-Token=' . $token;
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Accept: application/json']);
+        
+        $response = curl_exec($ch);
+        curl_close($ch);
+        
+        if ($response) {
+            $data = json_decode($response, true);
+            if (isset($data['MediaContainer']) && isset($data['MediaContainer']['Directory'])) {
+                $libraries = [];
+                foreach ($data['MediaContainer']['Directory'] as $dir) {
+                    $libraries[] = [
+                        'id' => $dir['key'],
+                        'title' => $dir['title'],
+                        'type' => $dir['type']
+                    ];
+                }
+                return $libraries;
+            }
+        }
+    }
+    
+    // If all else fails, return empty array
     return [];
 }
 

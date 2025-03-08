@@ -24,14 +24,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password_updated = true;
     }
     
+    // Test Plex connection and fetch libraries if token is provided
+    $plex_message = null;
+    if (!empty($data['settings']['plex_token'])) {
+        $server_id = get_plex_server_id($data['settings']['plex_token']);
+        if ($server_id) {
+            // Connection successful, fetch libraries
+            $libraries = get_plex_library_sections($data['settings']['plex_token']);
+            
+            if (!empty($libraries)) {
+                // Update libraries in data
+                $data['libraries'] = [];
+                foreach ($libraries as $library) {
+                    $data['libraries'][] = [
+                        'id' => $library['id'],
+                        'name' => $library['title'] ?? $library['id'],
+                        'type' => $library['type'] ?? 'unknown'
+                    ];
+                }
+                $plex_message = 'Plex connection successful! Found ' . count($libraries) . ' libraries.';
+            } else {
+                $plex_message = 'Connected to Plex server, but no libraries were found.';
+            }
+        } else {
+            $plex_message = 'Could not connect to Plex server. Please check your token.';
+        }
+    }
+    
     // Save data
     save_data($data);
     
     // Set flash message
     if (isset($password_updated)) {
-        set_flash_message('Settings and password updated successfully', 'success');
+        set_flash_message('Settings and password updated successfully' . 
+            ($plex_message ? ' - ' . $plex_message : ''), 'success');
     } else {
-        set_flash_message('Settings updated successfully', 'success');
+        set_flash_message('Settings updated successfully' . 
+            ($plex_message ? ' - ' . $plex_message : ''), 'success');
     }
     
     // Redirect to refresh the page

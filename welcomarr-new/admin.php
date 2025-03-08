@@ -200,7 +200,19 @@ if (isset($_GET['delete']) && !empty($_GET['delete'])) {
                                     <?php if (!empty($invitation['libraries'])): ?>
                                     <div class="small">
                                         <?php foreach ($invitation['libraries'] as $lib_id): ?>
-                                            <span class="badge bg-info"><?php echo $lib_id; ?></span>
+                                            <?php 
+                                                $lib_name = $lib_id;
+                                                // Find library name from ID
+                                                if (!empty($data['libraries'])) {
+                                                    foreach ($data['libraries'] as $lib) {
+                                                        if ($lib['id'] == $lib_id) {
+                                                            $lib_name = $lib['name'];
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            ?>
+                                            <span class="badge bg-info"><?php echo htmlspecialchars($lib_name); ?></span>
                                         <?php endforeach; ?>
                                     </div>
                                     <?php else: ?>
