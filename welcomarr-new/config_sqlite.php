@@ -343,19 +343,29 @@ function delete_invitation($code) {
     return $stmt->execute();
 }
 
-function update_invitation_usage($code) {
+function update_invitation_usage($code, $username = null) {
     $db = get_db_connection();
     $stmt = $db->prepare('
         UPDATE invitations 
         SET usage_count = usage_count + 1,
-            last_used_at = :last_used_at
+            last_used_at = :last_used_at,
+            last_used_by = :last_used_by
         WHERE code = :code
     ');
     
     $stmt->bindValue(':code', $code, SQLITE3_TEXT);
     $stmt->bindValue(':last_used_at', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+    $stmt->bindValue(':last_used_by', $username, SQLITE3_TEXT);
     
-    return $stmt->execute();
+    $result = $stmt->execute();
+    
+    if ($result) {
+        error_log("Updated invitation usage for code: $code, used by: $username");
+        return true;
+    } else {
+        error_log("Failed to update invitation usage for code: $code");
+        return false;
+    }
 }
 
 function is_invitation_valid($invitation) {
@@ -534,6 +544,7 @@ function add_user_to_plex($username, $libraries = []) {
     $token = $settings['plex_token'];
     
     if (empty($token)) {
+        error_log("Plex token not configured");
         return [
             'success' => false,
             'message' => 'Plex token not configured'
@@ -541,22 +552,28 @@ function add_user_to_plex($username, $libraries = []) {
     }
     
     // Get user ID from Plex
+    error_log("Looking up Plex user ID for username: $username");
     $user_id = get_plex_user_id($username, $token);
     if (!$user_id) {
+        error_log("User not found on Plex: $username");
         return [
             'success' => false,
             'message' => 'User not found on Plex'
         ];
     }
+    error_log("Found Plex user ID: $user_id for username: $username");
     
     // Get server ID
+    error_log("Getting Plex server ID");
     $server_id = get_plex_server_id($token);
     if (!$server_id) {
+        error_log("Plex server not found");
         return [
             'success' => false,
             'message' => 'Plex server not found'
         ];
     }
+    error_log("Found Plex server ID: $server_id");
     
     // Add user to server
     $url = 'https://plex.tv/api/v2/shared_servers';
@@ -569,20 +586,32 @@ function add_user_to_plex($username, $libraries = []) {
     // Prepare library section IDs
     $section_ids = [];
     if (!empty($libraries)) {
+        error_log("Getting library sections to share specific libraries: " . implode(', ', $libraries));
         $all_sections = get_plex_library_sections($token);
         foreach ($all_sections as $section) {
             if (in_array($section['id'], $libraries)) {
                 $section_ids[] = $section['id'];
+                error_log("Adding library to share: {$section['id']} ({$section['title']})");
             }
         }
     }
     
     // If no specific libraries are selected, share all
     if (empty($section_ids)) {
+        error_log("No specific libraries selected, sharing all libraries");
         $all_sections = get_plex_library_sections($token);
         foreach ($all_sections as $section) {
             $section_ids[] = $section['id'];
+            error_log("Adding library to share: {$section['id']} ({$section['title']})");
         }
+    }
+    
+    if (empty($section_ids)) {
+        error_log("No libraries found to share");
+        return [
+            'success' => false,
+            'message' => 'No libraries found to share'
+        ];
     }
     
     $post_data = [
@@ -591,27 +620,33 @@ function add_user_to_plex($username, $libraries = []) {
         'librarySectionIds' => $section_ids
     ];
     
+    error_log("Sending request to Plex API to share server: " . json_encode($post_data));
+    
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post_data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     
     // Execute the request
     $response = curl_exec($ch);
     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
     curl_close($ch);
     
     // Check if the request was successful
     if ($http_code >= 200 && $http_code < 300) {
+        error_log("Successfully added user to Plex server");
         return [
             'success' => true,
             'message' => 'User added to Plex server successfully'
         ];
     } else {
+        error_log("Failed to add user to Plex server: HTTP $http_code, Error: $curl_error, Response: $response");
         return [
             'success' => false,
-            'message' => 'Failed to add user to Plex server: ' . $response
+            'message' => "Failed to add user to Plex server (HTTP $http_code): " . ($response ?: $curl_error)
         ];
     }
 }
@@ -674,10 +709,13 @@ function get_plex_library_sections($token) {
     $server_id = get_plex_server_id($token);
     
     if (!$server_id) {
+        error_log("Failed to get Plex server ID");
         return [];
     }
     
-    // First try the Plex.tv API
+    $libraries = [];
+    
+    // Method 1: Try the Plex.tv API
     $url = 'https://plex.tv/api/v2/servers/' . $server_id . '/libraries?X-Plex-Token=' . $token;
     $headers = [
         'Accept: application/json'
@@ -686,32 +724,40 @@ function get_plex_library_sections($token) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     
     $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curl_error = curl_error($ch);
     curl_close($ch);
     
-    if ($response) {
+    if ($response && $http_code >= 200 && $http_code < 300) {
         $data = json_decode($response, true);
         if (!empty($data)) {
+            error_log("Successfully retrieved libraries from Plex.tv API");
             return $data;
         }
+    } else {
+        error_log("Plex.tv API request failed: $curl_error (HTTP code: $http_code)");
     }
     
-    // If that fails, try direct server connection if URL is configured
+    // Method 2: Try direct server connection if URL is configured
     if (!empty($settings['plex_url'])) {
         $url = rtrim($settings['plex_url'], '/') . '/library/sections?X-Plex-Token=' . $token;
         
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['Accept: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
         
         $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_error = curl_error($ch);
         curl_close($ch);
         
-        if ($response) {
+        if ($response && $http_code >= 200 && $http_code < 300) {
             $data = json_decode($response, true);
             if (isset($data['MediaContainer']) && isset($data['MediaContainer']['Directory'])) {
-                $libraries = [];
                 foreach ($data['MediaContainer']['Directory'] as $dir) {
                     $libraries[] = [
                         'id' => $dir['key'],
@@ -719,12 +765,58 @@ function get_plex_library_sections($token) {
                         'type' => $dir['type']
                     ];
                 }
-                return $libraries;
+                if (!empty($libraries)) {
+                    error_log("Successfully retrieved libraries from direct server connection");
+                    return $libraries;
+                }
             }
+        } else {
+            error_log("Direct server connection failed: $curl_error (HTTP code: $http_code)");
         }
     }
     
-    // If all else fails, return empty array
+    // Method 3: Try alternative endpoint format
+    if (!empty($settings['plex_url'])) {
+        $url = rtrim($settings['plex_url'], '/') . '/library/sections?X-Plex-Token=' . $token . '&X-Plex-Container-Start=0&X-Plex-Container-Size=50';
+        
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Accept: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_error = curl_error($ch);
+        curl_close($ch);
+        
+        if ($response && $http_code >= 200 && $http_code < 300) {
+            $data = json_decode($response, true);
+            if (!empty($data) && isset($data['MediaContainer'])) {
+                // Different Plex versions might have different response formats
+                $directories = isset($data['MediaContainer']['Directory']) ? 
+                    $data['MediaContainer']['Directory'] : 
+                    (isset($data['MediaContainer']['Metadata']) ? $data['MediaContainer']['Metadata'] : []);
+                
+                if (is_array($directories)) {
+                    foreach ($directories as $dir) {
+                        $libraries[] = [
+                            'id' => $dir['key'] ?? $dir['id'] ?? '',
+                            'title' => $dir['title'] ?? $dir['name'] ?? 'Unknown',
+                            'type' => $dir['type'] ?? 'unknown'
+                        ];
+                    }
+                    if (!empty($libraries)) {
+                        error_log("Successfully retrieved libraries from alternative endpoint");
+                        return $libraries;
+                    }
+                }
+            }
+        } else {
+            error_log("Alternative endpoint request failed: $curl_error (HTTP code: $http_code)");
+        }
+    }
+    
+    error_log("Failed to retrieve any libraries from Plex");
     return [];
 }
 
@@ -732,24 +824,49 @@ function get_plex_library_sections($token) {
 function sync_plex_libraries() {
     $settings = get_settings();
     $token = $settings['plex_token'];
+    $plex_url = $settings['plex_url'] ?? '';
     
     if (empty($token)) {
-        return false;
+        error_log("Plex token not configured");
+        return [
+            'success' => false,
+            'message' => 'Plex token not configured'
+        ];
     }
     
+    // Get libraries from Plex
     $plex_libraries = get_plex_library_sections($token);
     
     if (empty($plex_libraries)) {
-        return false;
+        error_log("No libraries found or could not connect to Plex");
+        return [
+            'success' => false,
+            'message' => 'No libraries found or could not connect to Plex'
+        ];
     }
     
+    // Format libraries for database
     $libraries = [];
     foreach ($plex_libraries as $lib) {
         $libraries[] = [
             'library_id' => $lib['id'],
-            'name' => $lib['title'] ?? $lib['id']
+            'name' => $lib['title'] ?? $lib['name'] ?? $lib['id']
         ];
     }
     
-    return update_libraries($libraries);
+    // Update libraries in database
+    $result = update_libraries($libraries);
+    
+    if ($result) {
+        return [
+            'success' => true,
+            'message' => 'Successfully synced ' . count($libraries) . ' libraries',
+            'libraries' => $libraries
+        ];
+    } else {
+        return [
+            'success' => false,
+            'message' => 'Failed to update libraries in database'
+        ];
+    }
 }

@@ -1,17 +1,14 @@
 <?php
-require_once 'config.php';
+require_once 'config_sqlite.php';
 
 $page_title = 'Invitation';
-$data = load_data();
-$settings = $data['settings'];
+$settings = get_settings();
 
 // Get invitation code from URL
 $code = $_GET['code'] ?? '';
 
 // Find invitation by code
-$invitation_data = get_invitation_by_code($code);
-$invitation = $invitation_data ? $invitation_data['invitation'] : null;
-$invitation_index = $invitation_data ? $invitation_data['index'] : null;
+$invitation = get_invitation_by_code($code);
 
 // Check if invitation is valid
 $is_valid = is_invitation_valid($invitation);
@@ -29,34 +26,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $is_valid) {
         exit;
     }
     
-    // Add user to Plex server first
-    $plex_result = add_user_to_plex($plex_username, $invitation['libraries'] ?? []);
+    // Get libraries associated with this invitation
+    $invitation_libraries = get_invitation_libraries($invitation['id']);
+    $library_ids = array_column($invitation_libraries, 'library_id');
     
-    // Create user
-    $user = [
+    // Add user to Plex server first
+    $plex_result = add_user_to_plex($plex_username, $library_ids);
+    
+    // Create user record
+    $user_data = [
         'name' => $name,
         'email' => $email,
         'plex_username' => $plex_username,
         'joined' => date('Y-m-d H:i:s'),
         'invitation_code' => $code,
-        'libraries' => $invitation['libraries'] ?? [],
         'plex_status' => $plex_result['success'] ? 'added' : 'failed',
         'plex_message' => $plex_result['message'] ?? ''
     ];
     
-    // Add user to data
-    $data['users'][] = $user;
+    // Add user to database
+    $user_id = add_user($user_data);
     
     // Update invitation usage count
-    if (!isset($data['invitations'][$invitation_index]['usage_count'])) {
-        $data['invitations'][$invitation_index]['usage_count'] = 0;
-    }
-    $data['invitations'][$invitation_index]['usage_count']++;
-    $data['invitations'][$invitation_index]['last_used_by'] = $email ?: $plex_username;
-    $data['invitations'][$invitation_index]['last_used_at'] = date('Y-m-d H:i:s');
-    
-    // Save data
-    save_data($data);
+    update_invitation_usage($code, $plex_username);
     
     // Set flash message
     if ($plex_result['success']) {
